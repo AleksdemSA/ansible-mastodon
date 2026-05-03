@@ -1,0 +1,5 @@
+---
+- name: Restart Mastodon Service
+  ansible.builtin.systemd:
+    name: mastodon
+    state: restarted

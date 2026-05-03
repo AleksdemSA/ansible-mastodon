@@ -1,0 +1,124 @@
+---
+- name: Ensure data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0777'
+  loop:
+    - "{{ mastodon_data_dir }}/mst-postgres"
+    - "{{ mastodon_data_dir }}/mst-content"
+
+- name: Ensure Quadlet directory exists
+  ansible.builtin.file:
+    path: /etc/containers/systemd
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create Redis container
+  containers.podman.podman_container:
+    name: mst-redis
+    image: redis:7
+    ip: "{{ mastodon_ip_redis }}"
+    restart_policy: always
+    generate_systemd: {"path": "/etc/systemd/system/", "restart_policy": "always"}
+    state: started
+
+- name: Create Postgres container
+  containers.podman.podman_container:
+    name: mst-postgres
+    image: postgres:17.4
+    ip: "{{ mastodon_ip_postgres }}"
+    env:
+      POSTGRES_USER: "{{ mastodon_postgres_user }}"
+      POSTGRES_DB: "{{ mastodon_postgres_db }}"
+      POSTGRES_PASSWORD: "{{ mastodon_postgres_pass }}"
+    volumes:
+      - "{{ mastodon_data_dir }}/mst-postgres:/var/lib/postgresql/data:Z"
+      - "/tmp:/tmp:Z"
+    generate_systemd: {"path": "/etc/systemd/system/", "restart_policy": "always"}
+    state: started
+
+- name: Create Elasticsearch container
+  containers.podman.podman_container:
+    name: mst-elastic
+    image: elasticsearch:9.1.2
+    ip: "{{ mastodon_ip_elastic }}"
+    env:
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms2048m -Xmx2048m"
+    generate_systemd: {"path": "/etc/systemd/system/", "restart_policy": "always"}
+    state: started
+
+- name: Create Mastodon Quadlet definition
+  ansible.builtin.template:
+    src: mastodon.container.j2
+    dest: /etc/containers/systemd/mastodon.container
+    mode: '0644'
+  notify: Restart Mastodon Service
+
+- name: Ensure Mastodon is running via systemd
+  ansible.builtin.systemd:
+    name: mastodon
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Reload systemd to recognize new units
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Wait for Postgres to be ready
+  ansible.builtin.wait_for:
+    host: "{{ mastodon_ip_postgres }}"
+    port: 5432
+    timeout: 30
+
+- name: Wait for Mastodon Web to respond
+  ansible.builtin.uri:
+    url: "https://{{ mastodon_domain }}/health"
+    validate_certs: false
+    status_code: 200
+  register: mastodon_result
+  until: mastodon_result.status == 200
+  retries: "{{ mastodon_health_check_retries }}"
+  delay: "{{ mastodon_health_check_delay }}"
+
+- name: Deploy Mastodon cleanup script
+  ansible.builtin.template:
+    src: clearm.sh.j2
+    dest: "{{ mastodon_data_dir }}/mst-content/clearm.sh"
+    mode: '0755'
+    owner: "1000"
+    group: "1000"
+
+- name: Set MAILTO in crontab
+  ansible.builtin.cron:
+    name: MAILTO
+    env: true
+    job: "{{ mastodon_admin_email }}"
+    user: root
+
+- name: Set PATH in crontab
+  ansible.builtin.cron:
+    name: PATH
+    env: true
+    job: "/usr/local/bin:/usr/bin:/bin"
+    user: root
+
+- name: Set SHELL in crontab
+  ansible.builtin.cron:
+    name: SHELL
+    env: true
+    job: "/bin/bash"
+    user: root
+
+- name: Setup Cron job for Mastodon cleanup
+  ansible.builtin.cron:
+    name: "Mastodon daily maintenance"
+    minute: "{{ mastodon_daily_maintenance_minutes }}"
+    hour: "{{ mastodon_daily_maintenance_hourses }}"
+    user: root
+    job: "/usr/bin/podman exec -it mastodon /config/clearm.sh >/dev/null 2>&1"

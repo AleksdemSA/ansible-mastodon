@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Настройка окружения
+export RAILS_ENV=production
+
+# Функции очистки
+echo "Starting Mastodon cleanup..."
+
+tootctl accounts prune
+tootctl statuses remove --days 90
+tootctl media remove --days 90
+tootctl media remove --remove-headers --include-follows --days 14
+tootctl preview_cards remove --days 14
+tootctl media remove-orphans
+tootctl emoji purge
+tootctl search deploy
+tootctl feeds build
+
+echo "Cleanup finished!"

@@ -1,0 +1,46 @@
+[Unit]
+Description=Mastodon Web Service
+After=network-online.target
+
+[Container]
+Image=docker.io/linuxserver/mastodon:{{ mastodon_version }}
+ContainerName=mastodon
+PublishPort=443:443
+PublishPort=443:443/udp
+IP={{ mastodon_ip_app }}
+
+# Среда
+Environment=PUID=1000 PGID=1000
+Environment=LOCAL_DOMAIN={{ mastodon_domain }}
+Environment=REDIS_HOST={{ mastodon_ip_redis }}
+Environment=DB_HOST={{ mastodon_ip_postgres }}
+Environment=DB_USER={{ mastodon_postgres_user }}
+Environment=DB_NAME={{ mastodon_postgres_db }}
+Environment=DB_PASS={{ mastodon_postgres_pass }}
+Environment=ES_ENABLED=true
+Environment=ES_HOST={{ mastodon_ip_elastic }}
+Environment=SECRET_KEY_BASE={{ mastodon_secret_key_base }}
+Environment=OTP_SECRET="{{ mastodon_otp_secret }}"
+Environment=SMTP_SERVER="{{ mastodon_smtp_server }}"
+Environment=SMTP_LOGIN="{{ mastodon_smtp_login }}"
+Environment=SMTP_PASSWORD="{{ mastodon_smtp_pass }}"
+Environment=ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY="{{ mastodon_active_record_primary_key }}"
+Environment=ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="{{ mastodon_active_record_deterministic_key }}"
+Environment=ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="{{ mastodon_active_record_salt }}"
+Environment=SIDEKIQ_THREADS="{{ mastodon_sidekiq_threads }}"
+Environment=DB_POOL=100
+
+# Монтирование
+Volume={{ mastodon_data_dir }}/mst-content:/config:Z
+Volume={{ mastodon_letsencrypt_dir }}/:/etc/letsencrypt:ro
+
+HealthCmd=curl -f http://localhost:3000/health || exit 1
+HealthInterval=30s
+HealthRetries=3
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
